@@ -10,9 +10,9 @@ Không cần cài đặt thư viện nào: frontend là HTML/CSS/JS thuần, ser
 |---|---|---|---|
 | 🔢 | Đếm chấm | Chấm hiện 2 giây, nhập số chấm đã thấy | Tỉ lệ log giữa số đoán và số thật |
 | 🎯 | Điểm rơi | Bóng bay rồi biến mất, bấm vào chỗ bóng sẽ chạm đất | Khoảng cách (px) |
-| 📐 | Góc | Kéo kim tới đúng góc yêu cầu (ngược chiều kim đồng hồ) | Độ lệch góc (°) |
+| 📐 | Góc | Di chuột để xoay kim tới đúng góc yêu cầu (ngược chiều kim đồng hồ), click để chốt | Độ lệch góc (°) |
 | 🥁 | Giữ nhịp | Gõ theo 8 tiếng nhịp; khi nhịp tắt, gõ đều thêm 8 lần | Độ trôi nhịp + độ dao động (ms) |
-| ✂️ | Chia đoạn | Đánh dấu một tỉ lệ (phân số hoặc %) trên đoạn thẳng | Độ lệch so với chiều dài đoạn (%) |
+| ✂️ | Chia đoạn | Di chuột đặt vạch ở một tỉ lệ (phân số hoặc %) trên đoạn thẳng, click để chốt | Độ lệch so với chiều dài đoạn (%) |
 
 Điểm mỗi bài: `100 × e^(−½·(sai số/σ)²)`, làm tròn 0–100. Điểm tổng là trung bình 5 bài.
 
@@ -40,7 +40,7 @@ Khi đấu, có thể chọn:
 - **Cả lượt** — một đồng hồ cho cả 5 bài (chọn nhanh 45/60/90/120/180 giây).
 - **Mỗi thử thách** — đếm ngược riêng từng bài (chọn nhanh 10/15/20/30 giây).
 
-Có thể tự nhập 5–3600 giây. Hết giờ thì lượt tự dừng: bài đang làm dở được chấm theo thao tác hiện tại (số đã gõ, kim đang giữ, vạch đang kéo, hoặc nhịp nếu đã gõ từ 3 lần), bài chưa làm được 0 điểm.
+Có thể tự nhập 5–3600 giây. Hết giờ thì lượt tự dừng: bài đang làm dở được chấm theo thao tác hiện tại (số đã gõ, vị trí kim/vạch đang theo chuột, hoặc nhịp nếu đã gõ từ 3 lần), bài chưa làm được 0 điểm.
 
 ## Cách chạy
 

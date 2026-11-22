@@ -314,9 +314,23 @@ const PREDICT = {
 /* 3. Góc */
 const ACX = 400, ACY = 270, AR = 180;
 const polar = (a, r) => [ACX + r * Math.cos(a * D), ACY - r * Math.sin(a * D)];
+/* Chuột/bút: con trỏ đi theo chuột không cần giữ nút, click (nhấn + thả trên canvas) để chốt.
+   Cảm ứng không có hover: chạm, kéo, thả để chốt. */
+function hoverPick(st, t, update, commit) {
+  let pressed = false;
+  t.on(st.c, 'pointermove', e => { if (e.pointerType === 'mouse' || e.pointerType === 'pen' || pressed) update(e); });
+  t.on(st.c, 'pointerdown', e => {
+    e.preventDefault(); pressed = true;
+    try { st.c.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    update(e);
+  });
+  t.on(st.c, 'pointerup', e => { if (!pressed) return; pressed = false; update(e); commit(); });
+  t.on(st.c, 'pointercancel', () => { pressed = false; });
+}
+
 const ANGLE = {
   id: 'angle', emoji: '📐', name: 'Góc', sigma: 8,
-  instruction: p => `Nhấn & kéo để xoay kim tới đúng ${p.target}°, ngược chiều kim đồng hồ tính từ vạch ngang nét đứt. Thả tay để chốt.`,
+  instruction: p => `Di chuột để xoay kim tới đúng ${p.target}°, ngược chiều kim đồng hồ tính từ vạch ngang nét đứt. Click để chốt (cảm ứng: chạm, kéo, thả).`,
   target: p => `Mục tiêu ${p.target}°`,
   generate(r) {
     let a = r.int(8, 352);
@@ -336,23 +350,16 @@ const ANGLE = {
   play(st, p, hud, signal) {
     return task(signal, async t => {
       const c = C();
-      let ang = 0, dragging = false;
+      let ang = 0, moved = false;
       const paint = () => {
         st.clear(); this.base(st.g);
-        this.needle(st.g, ang, dragging ? c.accent : c.ink, 4, AR);
+        this.needle(st.g, ang, moved ? c.accent : c.ink, 4, AR);
         text(st.g, `Mục tiêu: ${p.target}°`, 20, 32, { size: 20, align: 'left', weight: 800 });
-        text(st.g, 'nhấn & kéo · thả để chốt', 780, 32, { size: 13, align: 'right', color: c.dim });
+        text(st.g, 'di chuột để xoay · click để chốt', 780, 32, { size: 13, align: 'right', color: c.dim });
       };
       const fromEvt = e => { const q = st.toLogical(e); return norm360(Math.atan2(-(q.y - ACY), q.x - ACX) / D); };
       paint();
-      t.on(st.c, 'pointerdown', e => {
-        e.preventDefault(); dragging = true;
-        try { st.c.setPointerCapture(e.pointerId); } catch { /* ignore */ }
-        ang = fromEvt(e); t.partial = { a: r1(ang) }; paint();
-      });
-      t.on(st.c, 'pointermove', e => { if (!dragging) return; ang = fromEvt(e); t.partial = { a: r1(ang) }; paint(); });
-      t.on(st.c, 'pointerup', e => { if (!dragging) return; dragging = false; t.finish({ a: r1(fromEvt(e)) }); });
-      t.on(st.c, 'pointercancel', () => { dragging = false; paint(); });
+      hoverPick(st, t, e => { ang = fromEvt(e); moved = true; t.partial = { a: r1(ang) }; paint(); }, () => t.finish({ a: r1(ang) }));
     });
   },
   error(p, a) { const d = Math.abs(norm360(a.a) - p.target) % 360; return Math.min(d, 360 - d); },
@@ -468,7 +475,7 @@ const FRACS = [[1, 3], [2, 3], [1, 4], [3, 4], [2, 5], [3, 5], [4, 5], [1, 6], [
 const splitLabel = p => (p.pct ? `${p.num}%` : `${p.num}/${p.den}`);
 const SPLIT = {
   id: 'split', emoji: '✂️', name: 'Chia đoạn', sigma: 0.05,
-  instruction: p => `Đánh dấu điểm ở ${splitLabel(p)} chiều dài đoạn thẳng, tính từ đầu ${p.fromLeft ? 'TRÁI' : 'PHẢI'} (đầu có chấm cam). Nhấn, kéo, thả để chốt.`,
+  instruction: p => `Đánh dấu điểm ở ${splitLabel(p)} chiều dài đoạn thẳng, tính từ đầu ${p.fromLeft ? 'TRÁI' : 'PHẢI'} (đầu có chấm cam). Di chuột để đặt vạch, click để chốt (cảm ứng: chạm, kéo, thả).`,
   target: p => `${splitLabel(p)} từ đầu ${p.fromLeft ? 'trái' : 'phải'}`,
   generate(r) {
     const pct = r.bool();
@@ -490,23 +497,16 @@ const SPLIT = {
   play(st, p, hud, signal) {
     return task(signal, async t => {
       const c = C();
-      let x = null, dragging = false;
+      let x = null;
       const paint = () => {
         st.clear(); this.scene(st.g, p);
         text(st.g, `Đánh dấu ${splitLabel(p)} từ đầu chấm cam`, 400, 60, { size: 22, weight: 800 });
-        text(st.g, 'nhấn, kéo, thả để chốt', 400, 92, { size: 13, color: c.dim });
+        text(st.g, 'di chuột để đặt vạch · click để chốt', 400, 92, { size: 13, color: c.dim });
         if (x != null) { tick(st.g, x, SY, 56, c.accent, 3); dot(st.g, x, SY - 32, 7, c.accent); }
       };
       const fromEvt = e => clamp(st.toLogical(e).x, p.x1, p.x2);
       paint();
-      t.on(st.c, 'pointerdown', e => {
-        e.preventDefault(); dragging = true;
-        try { st.c.setPointerCapture(e.pointerId); } catch { /* ignore */ }
-        x = fromEvt(e); t.partial = { x: r1(x) }; paint();
-      });
-      t.on(st.c, 'pointermove', e => { if (!dragging) return; x = fromEvt(e); t.partial = { x: r1(x) }; paint(); });
-      t.on(st.c, 'pointerup', e => { if (!dragging) return; dragging = false; t.finish({ x: r1(fromEvt(e)) }); });
-      t.on(st.c, 'pointercancel', () => { dragging = false; paint(); });
+      hoverPick(st, t, e => { x = fromEvt(e); t.partial = { x: r1(x) }; paint(); }, () => t.finish({ x: r1(x) }));
     });
   },
   error: (p, a) => Math.abs(a.x - p.target) / (p.x2 - p.x1),
