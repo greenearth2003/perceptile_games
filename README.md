@@ -29,6 +29,8 @@ Không cần cài đặt thư viện nào: frontend là HTML/CSS/JS thuần, ser
   - Cả phòng đếm ngược và bắt đầu cùng lúc, cùng đề; đáp án người khác được giấu đến khi tất cả xong.
   - Trưởng phòng có thể mời người ra, kết thúc trận ngay, mở ván mới. Trưởng phòng rời đi thì quyền chuyển cho người kế tiếp.
   - Reload giữa trận vẫn chơi tiếp đúng bài đang dở.
+  - **Số ván của trận**: trưởng phòng chọn *Tự do* hoặc 1–20 ván (nút nhanh 1/3/5/7/10). Mỗi ván một đề mới; hết số ván thì công bố vô địch theo **điểm trung bình**. Đổi số ván = bắt đầu trận mới.
+  - **Lịch sử phòng**: sau mỗi ván hiện bảng xếp hạng (số ván, điểm TB, cao nhất, ván gần nhất) và biểu đồ điểm tổng từng ván của mọi người chơi (rê chuột lên điểm để xem chi tiết). Chế độ *Tự do* cộng dồn tối đa 30 ván gần nhất.
 
 Mọi chế độ đấu đều cho kết quả công bằng: **cùng mã đề → cùng số chấm, cùng quỹ đạo, cùng góc, cùng nhịp, cùng đoạn thẳng** (sinh từ seed cố định). Bảng kết quả xếp hạng theo tổng điểm → số bài thắng → thời gian, kèm biểu đồ radar và hình vẽ đáp án đúng cạnh câu trả lời của từng người.
 
@@ -109,7 +111,7 @@ server.py    Server tĩnh + API phòng online (Server-Sent Events), chỉ dùng 
 | `POST` | `/api/rooms/<ID>/join` | Vào phòng `{name, token?}` (có token = vào lại) |
 | `GET` | `/api/rooms/<ID>/events?token=` | Luồng SSE trạng thái phòng |
 | `GET` | `/api/rooms/<ID>/poll?token=&v=` | Long-poll thay SSE: trả ngay nếu version ≠ `v`, không thì chờ tối đa 20s |
-| `POST` | `/api/rooms/<ID>/config` | 👑 Đổi cài đặt `{token, config:{code, timer}}` |
+| `POST` | `/api/rooms/<ID>/config` | 👑 Đổi cài đặt `{token, config:{code, timer, rounds}}` (`rounds` 0 = tự do, 1–20) |
 | `POST` | `/api/rooms/<ID>/start` · `force` · `reset` · `kick` | 👑 Bắt đầu / kết thúc ngay / ván mới / mời ra |
 | `POST` | `/api/rooms/<ID>/answer` · `finish` · `leave` | Nộp từng bài / nộp xong / rời phòng |
 | `GET` | `/api/ping` | Kiểm tra server phòng online |

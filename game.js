@@ -904,8 +904,10 @@ const TRULES = {
 };
 function segBtn(label, sub) { return el('button', { type: 'button', 'aria-pressed': 'false' }, label, el('small', {}, sub)); }
 
-function configEditor({ cfg, editable = true, onChange = null }) {
+const RPRESETS = [0, 1, 3, 5, 7, 10];
+function configEditor({ cfg, editable = true, onChange = null, withRounds = false }) {
   let scope = cfg.timer ? cfg.timer.scope : 'none';
+  let rounds = Number(cfg.rounds) || 0;
   const code = el('input', { type: 'text', class: 'code', maxlength: '12', value: cfg.code || randCode() });
   const reroll = el('button', { class: 'btn small', type: 'button', title: 'Đề khác' }, '🎲');
   const tNone = segBtn('Không giới hạn', 'Chơi thoải mái');
@@ -918,6 +920,25 @@ function configEditor({ cfg, editable = true, onChange = null }) {
     el('div', { class: 'sec-input' }, secInp, el('span', { class: 'dim' }, 'giây (tự nhập 5–3600)')));
   const ruleHint = el('p', { class: 'hint' });
   const emit = () => { if (editable && onChange) onChange(); };
+  const rPresets = el('div', { class: 'presets' });
+  const rInp = el('input', { type: 'number', min: '1', max: '20', step: '1', inputmode: 'numeric', value: rounds ? String(rounds) : '' , placeholder: '–' });
+  const rHint = el('p', { class: 'hint' });
+  const renderRounds = () => {
+    rPresets.replaceChildren(...RPRESETS.map(n => {
+      const b = el('button', { type: 'button', 'aria-pressed': String(rounds === n), disabled: !editable }, n ? `${n} ván` : 'Tự do');
+      b.onclick = () => { rounds = n; rInp.value = n ? String(n) : ''; renderRounds(); emit(); };
+      return b;
+    }));
+    rHint.textContent = rounds ? `Chơi ${rounds} ván liên tiếp (mỗi ván một đề mới). Hết ${rounds} ván, xếp hạng theo điểm trung bình. Đổi số ván sẽ bắt đầu trận mới.`
+      : 'Không giới hạn số ván — bảng lịch sử cộng dồn mọi ván trong phòng.';
+  };
+  rInp.addEventListener('input', () => {
+    const n = parseInt(rInp.value, 10);
+    if (Number.isFinite(n) && n >= 1 && n <= 20) { rounds = n; renderRounds(); emit(); }
+  });
+  const roundsBox = withRounds ? el('div', { class: 'field' }, el('span', { class: 'lbl' }, 'Số ván của trận'), rPresets,
+    el('div', { class: 'sec-input' }, rInp, el('span', { class: 'dim' }, 'ván (tự nhập 1–20)')), rHint) : null;
+  renderRounds();
 
   const renderPresets = () => presets.replaceChildren(...(TPRESETS[scope] || []).map(s => {
     const b = el('button', { type: 'button', 'aria-pressed': String(Number(secInp.value) === s), disabled: !editable }, `${s}s`);
@@ -938,7 +959,7 @@ function configEditor({ cfg, editable = true, onChange = null }) {
   reroll.onclick = () => { code.value = randCode(); emit(); };
   code.addEventListener('input', emit);
   secInp.addEventListener('input', () => { renderPresets(); emit(); });
-  if (!editable) [code, reroll, tNone, tTurn, tEvent, secInp].forEach(x => { x.disabled = true; });
+  if (!editable) [code, reroll, tNone, tTurn, tEvent, secInp, rInp].forEach(x => { x.disabled = true; });
   setScope(scope, false);
 
   return {
@@ -946,19 +967,23 @@ function configEditor({ cfg, editable = true, onChange = null }) {
       el('div', { class: 'field' }, el('label', {}, 'Mã đề'), el('div', { class: 'row' }, code, reroll),
         el('p', { class: 'hint' }, 'Cùng mã = cùng đề. Nhập lại mã cũ để đấu lại đúng đề đó.')),
       el('div', { class: 'field' }, el('span', { class: 'lbl' }, 'Giới hạn thời gian'), el('div', { class: 'seg three' }, tNone, tTurn, tEvent)),
-      secBox, ruleHint),
+      secBox, ruleHint, roundsBox),
     get() {
       const c = code.value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
       if (!c) return { error: 'Nhập mã đề' };
-      if (scope === 'none') return { cfg: { code: c, timer: null } };
+      const extra = withRounds ? { rounds } : {};
+      if (scope === 'none') return { cfg: { code: c, timer: null, ...extra } };
       const sec = parseInt(secInp.value, 10);
       if (!Number.isFinite(sec) || sec < 5 || sec > 3600) return { error: 'Số giây phải từ 5 đến 3600' };
-      return { cfg: { code: c, timer: { scope, sec } } };
+      return { cfg: { code: c, timer: { scope, sec }, ...extra } };
     },
     set(c) {
       code.value = c.code || '';
       if (c.timer) secInp.value = String(c.timer.sec);
       setScope(c.timer ? c.timer.scope : 'none', false);
+      rounds = Number(c.rounds) || 0;
+      if (document.activeElement !== rInp) rInp.value = rounds ? String(rounds) : '';
+      renderRounds();
     },
   };
 }
@@ -1341,7 +1366,7 @@ function renderLobby(s, me) {
     return roomApi('config', { config: v.cfg }).then(() => true, e => { toast(e.message); return false; });
   };
   const editor = configEditor({
-    cfg: s.config, editable: isHost,
+    cfg: s.config, editable: isHost, withRounds: true,
     onChange: () => { clearTimeout(pushTimer); pushTimer = setTimeout(pushConfig, 350); },
   });
   const startBtn = el('button', { class: 'btn primary big', type: 'button' }, 'Bắt đầu');
@@ -1352,8 +1377,10 @@ function renderLobby(s, me) {
       if (await pushConfig()) await roomApi('start');
     } catch (e) { toast(e.message); } finally { startBtn.disabled = false; }
   });
-  ON.view = { isHost, plist, count, editor, startBtn };
-  show(el('section', { class: 'lobby' },
+  const histBox = el('div', { class: 'hist-box' });
+  const seriesNote = el('div', { class: 'series-note' });
+  ON.view = { isHost, plist, count, editor, startBtn, histBox, seriesNote, histKey: null };
+  show(el('section', { class: 'lobby' }, seriesNote,
     el('div', { class: 'center' }, el('div', { class: 'kicker' }, 'ID PHÒNG'), el('div', { class: 'room-id' }, s.id)),
     linkBox(`${baseUrl()}#room=${s.id}`),
     el('div', { class: 'panel' }, el('div', { class: 'row', style: 'justify-content:space-between;margin-bottom:10px' }, el('strong', {}, 'Người chơi'), count), plist),
@@ -1361,7 +1388,8 @@ function renderLobby(s, me) {
       el('strong', {}, 'Cài đặt trận'),
       el('div', { class: 'lock-note' }, isHost ? '👑 Bạn là trưởng phòng — mọi thay đổi tự đồng bộ tới các máy khác.' : '🔒 Chỉ trưởng phòng được chỉnh. Cài đặt tự cập nhật theo trưởng phòng.'),
       editor.node),
-    el('div', { class: 'btns' }, isHost ? startBtn : el('p', { class: 'hint' }, '⏳ Chờ trưởng phòng bắt đầu…'), leaveBtn())));
+    el('div', { class: 'btns' }, isHost ? startBtn : el('p', { class: 'hint' }, '⏳ Chờ trưởng phòng bắt đầu…'), leaveBtn()),
+    histBox));
   updateLobby(s, me);
 }
 function updateLobby(s, me) {
@@ -1370,10 +1398,16 @@ function updateLobby(s, me) {
   v.plist.replaceChildren(...playerRows(s, me, { kick: isHost }));
   v.count.textContent = `${s.players.length}/4 người`;
   if (!isHost) v.editor.set(s.config); // máy khách luôn hiển thị đúng cài đặt của trưởng phòng
+  const sr = seriesInfo(s);
+  v.seriesNote.textContent = sr.total ? `⚔️ Trận ${sr.total} ván · sắp chơi ván ${sr.played + 1}/${sr.total}` : '';
+  v.seriesNote.hidden = !sr.total;
+  const hk = `${(s.history || []).length}:${s.config.rounds}`;
+  if (v.histKey !== hk) { v.histKey = hk; v.histBox.replaceChildren(...[historyPanel(s)].filter(Boolean)); }
   if (isHost) {
     const ok = s.players.length >= 2;
     v.startBtn.disabled = !ok;
-    v.startBtn.textContent = ok ? `▶ Bắt đầu (${s.players.length} người)` : 'Cần ít nhất 2 người';
+    const label = sr.total ? `▶ Bắt đầu ván ${sr.played + 1}/${sr.total}` : '▶ Bắt đầu';
+    v.startBtn.textContent = ok ? `${label} (${s.players.length} người)` : 'Cần ít nhất 2 người';
   }
 }
 
@@ -1446,12 +1480,132 @@ function renderOnlineResults(s, me) {
   ON.view = null;
   const isHost = s.hostId === me.id;
   const players = s.players.map(p => ({ name: p.name, key: p.color, answers: p.answers, timeMs: p.timeMs || 0 }));
-  const again = el('button', { class: 'btn primary', type: 'button' }, '▶ Ván mới (đề mới)');
+  const sr = seriesInfo(s);
+  const again = el('button', { class: 'btn primary', type: 'button' },
+    !sr.total ? '▶ Ván mới (đề mới)' : sr.over ? '▶ Trận mới' : `▶ Ván tiếp theo (${sr.played + 1}/${sr.total})`);
   again.onclick = () => roomApi('reset').catch(e => toast(e.message));
+  const waitTxt = !sr.total ? '⏳ Chờ trưởng phòng mở ván mới…' : sr.over ? '⏳ Chờ trưởng phòng mở trận mới…' : `⏳ Chờ trưởng phòng mở ván ${sr.played + 1}/${sr.total}…`;
   compareScreen(`duel-${s.config.code}`, validTimer(s.config.timer), players, {
     noHome: true, sub: `Phòng ${s.id} · ● đã kết nối`,
-    extra: [isHost ? again : el('span', { class: 'hint', style: 'align-self:center' }, '⏳ Chờ trưởng phòng mở ván mới…'), leaveBtn()],
+    extra: [isHost ? again : el('span', { class: 'hint', style: 'align-self:center' }, waitTxt), leaveBtn()],
   });
+  if (sr.total) {
+    const top = roomStats(s.history || [])[0];
+    app.prepend(el('div', { class: `series-note${sr.over ? ' final' : ''}` }, sr.over
+      ? `🏆 Kết thúc trận ${sr.total} ván — vô địch: ${top ? `${top.name} (TB ${top.avg.toFixed(1)})` : '—'}`
+      : `⚔️ Trận ${sr.total} ván · xong ván ${sr.played}/${sr.total}`));
+  }
+  const hp = historyPanel(s);
+  if (hp) app.append(hp);
+}
+
+/* ---------- lịch sử phòng: điểm từng ván + điểm trung bình mỗi người ---------- */
+function seriesInfo(s) {
+  const total = Number(s.config && s.config.rounds) || 0, played = (s.history || []).length;
+  return { total, played, over: total > 0 && played >= total };
+}
+const SHAPES = { p1: 'circle', p2: 'square', p3: 'triangle', p4: 'diamond' };
+const escXml = v => String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+function markerSvg(shape, x, y, r, color) {
+  const ring = 'stroke="var(--panel)" stroke-width="2"';
+  if (shape === 'square') return `<rect x="${x - r}" y="${y - r}" width="${2 * r}" height="${2 * r}" rx="1.5" fill="${color}" ${ring}/>`;
+  if (shape === 'triangle') return `<path d="M${x} ${y - r * 1.2}L${x + r * 1.15} ${y + r * .85}L${x - r * 1.15} ${y + r * .85}Z" fill="${color}" ${ring}/>`;
+  if (shape === 'diamond') return `<path d="M${x} ${y - r * 1.3}L${x + r * 1.3} ${y}L${x} ${y + r * 1.3}L${x - r * 1.3} ${y}Z" fill="${color}" ${ring}/>`;
+  return `<circle cx="${x}" cy="${y}" r="${r}" fill="${color}" ${ring}/>`;
+}
+function roomStats(history) {
+  const byId = new Map();
+  history.forEach((h, ri) => h.players.forEach(p => {
+    const total = evaluate(`duel-${h.code}`, p.answers).total;
+    if (!byId.has(p.id)) byId.set(p.id, { id: p.id, name: p.name, color: p.color, pts: [] });
+    const st = byId.get(p.id);
+    st.name = p.name; st.color = p.color;
+    st.pts.push({ ri, n: h.n, code: h.code, total });
+  }));
+  const rows = [...byId.values()].map(r => ({
+    ...r, rounds: r.pts.length,
+    avg: r.pts.reduce((a, b) => a + b.total, 0) / r.pts.length,
+    best: Math.max(...r.pts.map(x => x.total)),
+    last: r.pts[r.pts.length - 1].total,
+  }));
+  rows.sort((a, b) => b.avg - a.avg || b.rounds - a.rounds);
+  return rows;
+}
+function historyChart(history, rows, inRoom) {
+  const W = 640, H = 270, L = 40, R = 120, T = 16, B = 34, pw = W - L - R, ph = H - T - B;
+  const n = history.length;
+  const xOf = ri => L + (n === 1 ? pw / 2 : ri / (n - 1) * pw);
+  const yOf = v => T + (1 - v / 100) * ph;
+  let g = '';
+  for (const v of [0, 25, 50, 75, 100]) {
+    g += `<line x1="${L}" x2="${L + pw}" y1="${yOf(v)}" y2="${yOf(v)}" stroke="var(--faint)" stroke-width="1" ${v ? 'stroke-dasharray="2 4"' : ''}/>`;
+    g += `<text x="${L - 8}" y="${yOf(v) + 4}" text-anchor="end" class="ax">${v}</text>`;
+  }
+  const step = Math.ceil(n / 10);
+  history.forEach((h, ri) => { if (ri % step === 0 || ri === n - 1) g += `<text x="${xOf(ri)}" y="${H - 12}" text-anchor="middle" class="ax">V${h.n}</text>`; });
+  const ends = [];
+  const order = [...rows].sort((a, b) => KEYS.indexOf(a.color) - KEYS.indexOf(b.color));
+  for (const r of order) {
+    const col = `var(--${r.color})`;
+    // nối các ván liên tiếp; vắng ván nào thì đứt nét ở đó
+    let path = '', prev = null;
+    for (const pt of r.pts) {
+      path += `${prev !== null && pt.ri === prev + 1 ? 'L' : 'M'}${xOf(pt.ri).toFixed(1)} ${yOf(pt.total).toFixed(1)}`;
+      prev = pt.ri;
+    }
+    g += `<path d="${path}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    for (const pt of r.pts) {
+      g += markerSvg(SHAPES[r.color], xOf(pt.ri), yOf(pt.total), 4.5, col);
+      g += `<circle cx="${xOf(pt.ri)}" cy="${yOf(pt.total)}" r="12" fill="transparent"><title>${escXml(r.name)} · Ván ${pt.n} (đề ${escXml(pt.code)}): ${pt.total} điểm</title></circle>`;
+    }
+    const lp = r.pts[r.pts.length - 1];
+    if (lp.ri === n - 1) ends.push({ r, x: xOf(lp.ri), y: yOf(lp.total) });  // người vắng ván cuối: xem bảng/tooltip
+  }
+  // nhãn tên cuối mỗi đường, đẩy ra cho khỏi chồng nhau
+  ends.sort((a, b) => a.y - b.y);
+  let lastY = -Infinity;
+  for (const e of ends) {
+    const y = Math.max(e.y, lastY + 15); lastY = y;
+    const name = e.r.name.length > 12 ? e.r.name.slice(0, 11) + '…' : e.r.name;
+    g += markerSvg(SHAPES[e.r.color], L + pw + 18, y, 4, `var(--${e.r.color})`);
+    g += `<text x="${L + pw + 28}" y="${y + 4}" class="lbl${inRoom.has(e.r.id) ? '' : ' gone'}">${escXml(name)}</text>`;
+  }
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('class', 'hist-chart');
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', `Điểm tổng từng ván của ${rows.length} người chơi qua ${n} ván`);
+  svg.innerHTML = g;
+  return svg;
+}
+function historyPanel(s) {
+  const history = Array.isArray(s.history) ? s.history : [];
+  if (!history.length) return null;
+  const rows = roomStats(history);
+  const inRoom = new Set(s.players.map(p => p.id));
+  const swatch = r => {
+    const sv = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    sv.setAttribute('viewBox', '0 0 16 16'); sv.setAttribute('class', 'swatch');
+    sv.innerHTML = markerSvg(SHAPES[r.color], 8, 8, 5, `var(--${r.color})`);
+    return sv;
+  };
+  const medal = i => ['🥇', '🥈', '🥉'][i] || `${i + 1}.`;
+  const table = el('table', { class: 'hist-tab' },
+    el('thead', {}, el('tr', {}, el('th', {}, ''), el('th', {}, 'Người chơi'), el('th', {}, 'Số ván'), el('th', {}, 'Điểm TB'), el('th', {}, 'Cao nhất'), el('th', {}, 'Ván gần nhất'))),
+    el('tbody', {}, ...rows.map((r, i) => el('tr', {},
+      el('td', {}, history.length > 1 ? medal(i) : ''),
+      el('td', {}, el('span', { class: 'who' }, swatch(r), r.name, inRoom.has(r.id) ? null : el('span', { class: 'hint' }, ' (đã rời)'))),
+      el('td', {}, String(r.rounds)),
+      el('td', { class: 'avg' }, r.avg.toFixed(1)),
+      el('td', {}, String(r.best)),
+      el('td', {}, String(r.last))))));
+  return el('section', { class: 'panel hist' },
+    el('div', { class: 'row', style: 'justify-content:space-between;align-items:baseline' },
+      el('strong', {}, seriesInfo(s).total ? `📈 Trận ${seriesInfo(s).total} ván · phòng ${s.id}` : `📈 Lịch sử phòng ${s.id}`),
+      el('span', { class: 'hint' }, `${seriesInfo(s).total ? `đã chơi ${history.length}/${seriesInfo(s).total} ván` : `${history.length} ván`} · điểm tổng 0–100 mỗi ván`)),
+    table,
+    historyChart(history, rows, inRoom),
+    el('p', { class: 'hint' }, 'Điểm TB = trung bình điểm tổng các ván người đó đã chơi trong phòng. Rê chuột lên từng điểm để xem chi tiết.'));
 }
 
 /* ---------- router ---------- */

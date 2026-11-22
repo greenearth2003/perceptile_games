@@ -30,6 +30,8 @@ MAX_BODY = 32 * 1024
 START_DELAY_MS = 4000          # đếm ngược đồng bộ trước khi cả phòng bắt đầu
 DEADLINE_GRACE_MS = 4000       # bù trễ mạng khi hết giờ "cả lượt"
 HEARTBEAT_S = 15
+MAX_HISTORY = 30     # giữ tối đa 30 ván gần nhất mỗi phòng
+MAX_ROUNDS = 20      # trận tối đa 20 ván; 0 = tự do (không giới hạn)
 POLL_WAIT_S = 20     # long-poll: giữ request tối đa 20s chờ phòng thay đổi
 POLL_ONLINE_S = 40   # máy dùng long-poll coi là online nếu poll trong 40s gần nhất
 ALPHA = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -81,6 +83,14 @@ def valid_timer(t):
     return {'scope': t['scope'], 'sec': sec}
 
 
+def valid_rounds(r):
+    if r is None:
+        return 0
+    if not is_int(r) or not 0 <= r <= MAX_ROUNDS:
+        raise ApiError(400, f'Số ván phải từ 1 đến {MAX_ROUNDS} (0 = tự do)')
+    return r
+
+
 def valid_answer(a):
     if a is None:
         return None
@@ -94,12 +104,13 @@ class Room:
         self.id = rid
         self.state = 'lobby'            # lobby | playing | done
         self.round = 0
-        self.config = {'code': rand_code(), 'timer': {'scope': 'turn', 'sec': 90}}
+        self.config = {'code': rand_code(), 'timer': {'scope': 'turn', 'sec': 90}, 'rounds': 0}
         self.start_at = None
         self.players = []
         self.host_id = None
         self.version = 0
         self.touched = time.time()
+        self.history = []               # các ván đã xong: [{n, code, players:[{id,name,color,answers,timeMs}]}]
 
     def by_token(self, token):
         if not isinstance(token, str) or not token:
@@ -148,9 +159,20 @@ class Room:
         p['done'] = True
         p['time_ms'] = time_ms
 
+    def series_over(self):
+        n = self.config.get('rounds', 0)
+        return n > 0 and len(self.history) >= n
+
     def check_done(self):
         if self.state == 'playing' and self.players and all(p['done'] for p in self.players):
             self.state = 'done'
+            self.history.append({
+                'n': (self.history[-1]['n'] + 1) if self.history else 1,
+                'code': self.config['code'],
+                'players': [{'id': p['id'], 'name': p['name'], 'color': p['color'],
+                             'answers': list(p['answers']), 'timeMs': p['time_ms']} for p in self.players],
+            })
+            del self.history[:-MAX_HISTORY]
 
     def snapshot(self, viewer_id):
         reveal = self.state == 'done'
@@ -167,6 +189,7 @@ class Room:
             'id': self.id, 'state': self.state, 'round': self.round, 'config': self.config,
             'startAt': self.start_at, 'serverNow': now_ms(), 'hostId': self.host_id,
             'you': viewer_id, 'players': players, 'v': self.version,
+            'history': self.history,
         }
 
     def bump(self):
@@ -211,7 +234,10 @@ def act_config(room, data):
     cfg = data.get('config')
     if not isinstance(cfg, dict):
         raise ApiError(400, 'Cài đặt không hợp lệ')
-    room.config = {'code': valid_code(cfg.get('code')), 'timer': valid_timer(cfg.get('timer'))}
+    rounds = valid_rounds(cfg.get('rounds', room.config.get('rounds', 0)))
+    if rounds != room.config.get('rounds', 0):
+        room.history = []  # đổi số ván = bắt đầu trận mới, tính điểm TB lại từ đầu
+    room.config = {'code': valid_code(cfg.get('code')), 'timer': valid_timer(cfg.get('timer')), 'rounds': rounds}
 
 
 def act_start(room, data):
@@ -277,6 +303,8 @@ def act_reset(room, data):
         raise ApiError(409, 'Trận chưa kết thúc')
     room.state = 'lobby'
     room.start_at = None
+    if room.series_over():
+        room.history = []  # trận N ván đã xong => ván mới mở trận mới
     room.config = {**room.config, 'code': rand_code()}
     for p in room.players:
         p.update(answers=[], done=False, time_ms=None)
