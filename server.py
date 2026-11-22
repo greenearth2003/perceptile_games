@@ -310,6 +310,17 @@ def act_reset(room, data):
         p.update(answers=[], done=False, time_ms=None)
 
 
+def act_restart(room, data):
+    """Trưởng phòng xoá lịch sử và đưa cả phòng về phòng chờ (huỷ cả ván đang chơi) — đấu lại từ đầu."""
+    require(room, data, host=True)
+    room.history = []
+    room.state = 'lobby'
+    room.start_at = None
+    room.config = {**room.config, 'code': rand_code()}
+    for p in room.players:
+        p.update(answers=[], done=False, time_ms=None)
+
+
 def act_kick(room, data):
     require(room, data, host=True)
     target = room.by_id(data.get('playerId'))
@@ -327,7 +338,7 @@ def act_leave(room, data):
 
 ACTIONS = {
     'join': act_join, 'config': act_config, 'start': act_start, 'answer': act_answer,
-    'finish': act_finish, 'force': act_force, 'reset': act_reset, 'kick': act_kick, 'leave': act_leave,
+    'finish': act_finish, 'force': act_force, 'reset': act_reset, 'restart': act_restart, 'kick': act_kick, 'leave': act_leave,
 }
 
 

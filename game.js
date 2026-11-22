@@ -1468,7 +1468,7 @@ function renderWaiting(s, me) {
     el('div', { class: 'who', style: `--c:var(--${me.color})` }, 'Đã nộp bài ✓'),
     el('p', {}, 'Đang chờ các người chơi khác… Kết quả hiện khi tất cả xong.'),
     plist,
-    el('div', { class: 'btns' }, isHost ? force : null, leaveBtn())));
+    el('div', { class: 'btns' }, isHost ? force : null, isHost ? restartBtn() : null, leaveBtn())));
   updateWaiting(s, me);
 }
 function updateWaiting(s, me) {
@@ -1497,6 +1497,17 @@ function renderOnlineResults(s, me) {
   }
   const hp = historyPanel(s);
   if (hp) app.append(hp);
+}
+
+/* Trưởng phòng: xoá lịch sử + huỷ ván đang chơi, cả phòng về phòng chờ để đấu lại từ đầu */
+function restartBtn() {
+  const b = el('button', { class: 'btn', type: 'button' }, '↺ Đấu lại từ đầu');
+  b.onclick = () => {
+    if (!confirm('Xoá toàn bộ lịch sử và điểm trung bình của phòng, đưa mọi người về phòng chờ để đấu lại từ đầu?')) return;
+    b.disabled = true;
+    roomApi('restart').then(() => toast('Đã xoá lịch sử — đấu lại từ đầu'), e => { toast(e.message); b.disabled = false; });
+  };
+  return b;
 }
 
 /* ---------- lịch sử phòng: điểm từng ván + điểm trung bình mỗi người ---------- */
@@ -1605,6 +1616,7 @@ function historyPanel(s) {
       el('span', { class: 'hint' }, `${seriesInfo(s).total ? `đã chơi ${history.length}/${seriesInfo(s).total} ván` : `${history.length} ván`} · điểm tổng 0–100 mỗi ván`)),
     table,
     historyChart(history, rows, inRoom),
+    s.hostId === s.you ? el('div', { class: 'btns', style: 'justify-content:flex-start' }, restartBtn()) : null,
     el('p', { class: 'hint' }, 'Điểm TB = trung bình điểm tổng các ván người đó đã chơi trong phòng. Rê chuột lên từng điểm để xem chi tiết.'));
 }
 
