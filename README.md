@@ -78,6 +78,17 @@ Cách xử lý (chọn một):
 - Hoặc bỏ chặn bản Python đang dùng: `sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp <đường-dẫn-python>`
 - Hoặc vào System Settings → Network → Firewall → Options và cho phép Python.
 
+**Đưa ra internet bằng Cloudflare Tunnel / ngrok**
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:8000   # dùng 127.0.0.1, không dùng localhost (Windows thử IPv6 trước → chậm)
+```
+
+Quick Tunnel (`*.trycloudflare.com`) không hỗ trợ Server-Sent Events. Game tự nhận ra và chuyển sang long-poll (request thường, chờ tối đa 20 giây tới khi phòng thay đổi), nên vẫn chơi bình thường. Với proxy hoặc antivirus khác chặn Server-Sent Events, game cũng tự chuyển sau 3 giây không nhận được dữ liệu.
+
+**Windows: server thỉnh thoảng đứng hình**
+Click vào cửa sổ console đang chạy server sẽ bật chế độ chọn chữ (QuickEdit) và làm server dừng tới khi bấm Esc.
+
 **Thử nhiều người chơi trên cùng một máy**
 Chrome chỉ giữ tối đa 6 kết nối cùng lúc tới một địa chỉ. Đừng mở quá 4–5 tab phòng trên cùng một trình duyệt — dùng các trình duyệt hoặc máy khác nhau.
 
@@ -97,6 +108,7 @@ server.py    Server tĩnh + API phòng online (Server-Sent Events), chỉ dùng 
 | `POST` | `/api/rooms` | Tạo phòng `{name}` → `{roomId, playerId, token}` |
 | `POST` | `/api/rooms/<ID>/join` | Vào phòng `{name, token?}` (có token = vào lại) |
 | `GET` | `/api/rooms/<ID>/events?token=` | Luồng SSE trạng thái phòng |
+| `GET` | `/api/rooms/<ID>/poll?token=&v=` | Long-poll thay SSE: trả ngay nếu version ≠ `v`, không thì chờ tối đa 20s |
 | `POST` | `/api/rooms/<ID>/config` | 👑 Đổi cài đặt `{token, config:{code, timer}}` |
 | `POST` | `/api/rooms/<ID>/start` · `force` · `reset` · `kick` | 👑 Bắt đầu / kết thúc ngay / ván mới / mời ra |
 | `POST` | `/api/rooms/<ID>/answer` · `finish` · `leave` | Nộp từng bài / nộp xong / rời phòng |

@@ -30,6 +30,8 @@ MAX_BODY = 32 * 1024
 START_DELAY_MS = 4000          # đếm ngược đồng bộ trước khi cả phòng bắt đầu
 DEADLINE_GRACE_MS = 4000       # bù trễ mạng khi hết giờ "cả lượt"
 HEARTBEAT_S = 15
+POLL_WAIT_S = 20     # long-poll: giữ request tối đa 20s chờ phòng thay đổi
+POLL_ONLINE_S = 40   # máy dùng long-poll coi là online nếu poll trong 40s gần nhất
 ALPHA = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 COLORS = ('p1', 'p2', 'p3', 'p4')
 ROOM_RE = re.compile(r'^/api/rooms/([A-Z0-9]{5})/([a-z]+)$')
@@ -116,7 +118,7 @@ class Room:
         used = {p['color'] for p in self.players}
         p = {
             'id': secrets.token_hex(4), 'token': secrets.token_urlsafe(18), 'name': name,
-            'color': next(c for c in COLORS if c not in used), 'conns': 0,
+            'color': next(c for c in COLORS if c not in used), 'conns': 0, 'seen': 0.0, 'was_on': False,
             'answers': [], 'time_ms': None, 'done': False,
         }
         self.players.append(p)
@@ -154,7 +156,7 @@ class Room:
         reveal = self.state == 'done'
         players = []
         for p in self.players:
-            d = {'id': p['id'], 'name': p['name'], 'color': p['color'], 'online': p['conns'] > 0,
+            d = {'id': p['id'], 'name': p['name'], 'color': p['color'], 'online': is_online(p),
                  'progress': len(p['answers']), 'done': p['done']}
             # Đáp án người khác chỉ lộ khi cả phòng xong; của mình thì luôn có (để chơi tiếp khi reload)
             if reveal or p['id'] == viewer_id:
@@ -164,7 +166,7 @@ class Room:
         return {
             'id': self.id, 'state': self.state, 'round': self.round, 'config': self.config,
             'startAt': self.start_at, 'serverNow': now_ms(), 'hostId': self.host_id,
-            'you': viewer_id, 'players': players,
+            'you': viewer_id, 'players': players, 'v': self.version,
         }
 
     def bump(self):
@@ -172,6 +174,11 @@ class Room:
         self.version += 1
         self.touched = time.time()
         COND.notify_all()
+
+
+def is_online(p):
+    # SSE: đang giữ kết nối; long-poll (qua tunnel/proxy không hỗ trợ SSE): vừa poll gần đây
+    return p['conns'] > 0 or time.time() - p['seen'] < POLL_ONLINE_S
 
 
 COND = threading.Condition()
@@ -299,7 +306,7 @@ ACTIONS = {
 def cleanup_locked():
     cutoff = time.time() - ROOM_IDLE_TTL_S
     for rid, room in list(ROOMS.items()):
-        if room.touched < cutoff and not any(p['conns'] for p in room.players):
+        if room.touched < cutoff and not any(is_online(p) for p in room.players):
             del ROOMS[rid]
             COND.notify_all()
 
@@ -320,6 +327,33 @@ def create_room(data):
     return {'roomId': rid, 'playerId': p['id'], 'token': p['token']}
 
 
+def poll(rid, token, v):
+    """Long-poll thay cho SSE (Cloudflare Quick Tunnel, vài proxy không chuyển SSE).
+    Trả snapshot ngay nếu version khác v, không thì chờ tối đa POLL_WAIT_S."""
+    try:
+        v = int(v)
+    except ValueError:
+        v = -1
+    end = time.time() + POLL_WAIT_S
+    with COND:
+        while True:
+            room = ROOMS.get(rid)
+            if room is None:
+                raise ApiError(404, 'Phòng không tồn tại hoặc đã đóng')
+            p = room.by_token(token)
+            if p is None:
+                raise ApiError(403, 'Bạn không còn trong phòng này (có thể đã bị mời ra)')
+            was_on = is_online(p)
+            p['seen'] = time.time()
+            if not was_on:
+                p['was_on'] = True
+                room.bump()
+            left = end - time.time()
+            if room.version != v or left <= 0:
+                return room.snapshot(p['id'])
+            COND.wait(timeout=left)
+
+
 def ticker():
     """Tự kết thúc lượt khi hết giờ 'cả lượt' (kể cả máy bị rớt mạng) + dọn phòng bỏ hoang."""
     while True:
@@ -333,6 +367,14 @@ def ticker():
                         if not p['done']:
                             room.finish_player(p, room.turn_cap_ms())
                     room.check_done()
+                    room.bump()
+                # Báo cho cả phòng khi một máy long-poll mất kết nối/quay lại
+                changed = False
+                for p in room.players:
+                    on = is_online(p)
+                    if on != p['was_on']:
+                        p['was_on'], changed = on, True
+                if changed:
                     room.bump()
             cleanup_locked()
 
@@ -392,8 +434,14 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == '/api/ping':
             return self.send_json(200, {'ok': True, 'app': 'nhanluc'})
         m = ROOM_RE.match(url.path)
+        q = parse_qs(url.query)
         if m and m.group(2) == 'events':
-            return self.stream(m.group(1), parse_qs(url.query).get('token', [''])[0])
+            return self.stream(m.group(1), q.get('token', [''])[0])
+        if m and m.group(2) == 'poll':
+            try:
+                return self.send_json(200, poll(m.group(1), q.get('token', [''])[0], q.get('v', ['-1'])[0]))
+            except ApiError as e:
+                return self.send_json(e.status, {'error': e.msg})
         self.send_json(404, {'error': 'Không tìm thấy'})
 
     def do_POST(self):

@@ -1208,14 +1208,25 @@ function enterRoom(id) {
   history.replaceState(null, '', `#room=${id}`);
   const slowHint = el('div', { class: 'panel', style: 'text-align:left', hidden: true },
     el('strong', {}, 'Kết nối lâu bất thường?'),
-    el('p', { class: 'hint' }, `Nếu bạn mở game bằng địa chỉ IP (vd ${location.host}) mà firewall của máy chạy server chặn Python, trình duyệt sẽ phải thử lại liên tục. Trên máy chạy server: mở bằng http://localhost:${location.port || 80}, hoặc chạy server bằng Python của hệ thống: /usr/bin/python3 server.py, hoặc cho phép Python trong System Settings → Network → Firewall → Options.`));
+    el('p', { class: 'hint' }, `Kiểm tra máy chạy server còn bật và cửa sổ server không bị treo (Windows: click vào cửa sổ console sẽ làm server dừng — bấm Esc). Nếu mở bằng địa chỉ IP (vd ${location.host}), firewall của máy chạy server có thể đang chặn Python.`));
   show(el('section', { class: 'gate' }, el('div', { class: 'kicker' }, 'Đang kết nối phòng…'), el('div', { class: 'room-id' }, id), slowHint));
   clearTimeout(ON.slowTimer);
   ON.slowTimer = setTimeout(() => { if (ON.phase === 'idle') slowHint.hidden = false; }, 4000);
   if (ON.es) ON.es.close();
+  // Cloudflare Quick Tunnel (và vài proxy/antivirus) không chuyển Server-Sent Events
+  // => dùng long-poll. Còn lại thử SSE trước, 3s không có dữ liệu thì tự chuyển sang long-poll.
+  if (ON.usePoll || /\.trycloudflare\.com$/i.test(location.hostname)) { ON.es = pollRoom(id, ON.creds.token); return; }
   const es = new EventSource(`/api/rooms/${id}/events?token=${encodeURIComponent(ON.creds.token)}`);
-  ON.es = es;
-  es.onmessage = e => { let s; try { s = JSON.parse(e.data); } catch { return; } onSnapshot(s); };
+  let got = false;
+  const handle = { close() { clearTimeout(fallback); es.close(); } };
+  const fallback = setTimeout(() => {
+    if (got || ON.es !== handle || ON.phase === 'gone') return;
+    ON.usePoll = true;
+    es.close();
+    ON.es = pollRoom(id, ON.creds.token);
+  }, 3000);
+  ON.es = handle;
+  es.onmessage = e => { got = true; let s; try { s = JSON.parse(e.data); } catch { return; } onSnapshot(s); };
   es.onerror = () => {
     if (ON.phase === 'gone' || ON.unloading) return;
     // Server trả 403/404 => EventSource đóng hẳn; lỗi mạng => tự kết nối lại.
@@ -1223,6 +1234,33 @@ function enterRoom(id) {
     if (es.readyState === EventSource.CLOSED) roomGone('Không vào được phòng — phòng đã đóng, server đã khởi động lại, hoặc bạn không còn trong phòng.', false);
     else setConn(false);
   };
+}
+// Long-poll: mỗi request chờ server tới khi phòng đổi (version khác v) hoặc ~20s.
+function pollRoom(id, token) {
+  const ctl = new AbortController();
+  let v = -1, stopped = false;
+  (async () => {
+    while (!stopped) {
+      try {
+        const r = await fetch(`/api/rooms/${id}/poll?token=${encodeURIComponent(token)}&v=${v}`, { cache: 'no-store', signal: ctl.signal });
+        if (stopped) return;
+        if (r.status === 403 || r.status === 404) {
+          const j = await r.json().catch(() => ({}));
+          if (!stopped && !ON.unloading) roomGone(j.error || 'Không vào được phòng.', r.status === 403);
+          return;
+        }
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const s = await r.json();
+        if (stopped) return;
+        if (s.v !== v) { v = s.v; onSnapshot(s); } else setConn(true);
+      } catch {
+        if (stopped || ON.unloading) return;
+        setConn(false);
+        await new Promise(res => setTimeout(res, 1500));
+      }
+    }
+  })();
+  return { close() { stopped = true; ctl.abort(); } };
 }
 // Reload/đóng tab làm EventSource báo lỗi — không được coi là bị mời ra
 window.addEventListener('pagehide', () => { ON.unloading = true; });
